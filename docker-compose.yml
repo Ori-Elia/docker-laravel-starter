@@ -1,0 +1,52 @@
+################################
+# todo
+# 1. 設定 ${project-name}-api
+# 2. 設定 ${project-name}-mysql
+# 3. 設定 ${project-name}-nginx
+################################
+
+services:
+  api:
+    container_name: ${project-name}-api
+    image: ${project-name}-api
+    build:
+      context: .
+      dockerfile: .docker/php/Dockerfile.dev
+    volumes:
+      - ./src:/var/www:delegated
+    environment:
+      PHP_MEMORY_LIMIT: 512M
+      UPLOAD_MAX_FILESIZE: 10M
+      POST_MAX_SIZE: 10M
+      PORT: 8080
+    depends_on:
+      - mysql
+
+  nginx:
+    container_name: ${project-name}-nginx
+    image: nginx:alpine
+    ports:
+      - "80:8080"
+    volumes:
+      - ./src:/var/www
+      - .docker/nginx/default.conf:/etc/nginx/conf.d/default.conf
+    environment:
+      PORT: 8080
+    depends_on:
+      - api
+
+  mysql:
+    container_name: ${project-name}-mysql
+    image: mysql:8.0
+    environment:
+      MYSQL_DATABASE: ${project-name}
+      MYSQL_USER: user
+      MYSQL_PASSWORD: secret
+      MYSQL_ROOT_PASSWORD: secret
+    ports:
+      - "3307:3306"
+    volumes:
+      - mysql_data:/var/lib/mysql
+
+volumes:
+  mysql_data:

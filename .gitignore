@@ -1,0 +1,6 @@
+# Docker 運行時檔案
+.docker/mysql/data/
+.docker/mysql/logs/
+
+.idea/*
+.github-mcp.json

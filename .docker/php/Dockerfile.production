@@ -1,0 +1,56 @@
+FROM php:8.3-fpm
+
+# 設定工作目錄
+WORKDIR /var/www
+
+# 安裝系統需要的套件
+RUN apt-get update && apt-get install -y \
+    libpng-dev \
+    libjpeg-dev \
+    libfreetype6-dev \
+    zip \
+    unzip \
+    git \
+    && rm -rf /var/lib/apt/lists/*
+
+# 安裝 PHP 擴充功能
+RUN docker-php-ext-install pdo pdo_mysql
+
+# 安裝 Composer
+COPY --from=composer:latest /usr/bin/composer /usr/bin/composer
+
+# PHP 配置
+RUN echo "memory_limit=512M" > /usr/local/etc/php/conf.d/memory-limit.ini \
+    && echo "upload_max_filesize=10M" > /usr/local/etc/php/conf.d/upload-max-filesize.ini \
+    && echo "post_max_size=10M" > /usr/local/etc/php/conf.d/post-max-size.ini
+
+# OPcache 配置（生產環境優化）
+RUN echo "opcache.enable=1" > /usr/local/etc/php/conf.d/opcache.ini \
+    && echo "opcache.memory_consumption=128" >> /usr/local/etc/php/conf.d/opcache.ini \
+    && echo "opcache.interned_strings_buffer=8" >> /usr/local/etc/php/conf.d/opcache.ini \
+    && echo "opcache.max_accelerated_files=4000" >> /usr/local/etc/php/conf.d/opcache.ini \
+    && echo "opcache.validate_timestamps=0" >> /usr/local/etc/php/conf.d/opcache.ini \
+    && echo "opcache.fast_shutdown=1" >> /usr/local/etc/php/conf.d/opcache.ini
+
+# 複製專案檔案
+COPY ./src /var/www/
+
+# 複製並重命名 .env 檔案
+COPY ./src/.env.production /var/www/.env
+
+# 安裝專案依賴並優化 Laravel
+RUN composer install --optimize-autoloader --no-dev \
+    && php artisan key:generate --force \
+    && php artisan optimize \
+    && php artisan config:cache \
+    && php artisan route:cache \
+    && php artisan view:cache
+
+# 設定檔案權限
+RUN chown -R www-data:www-data /var/www/storage /var/www/bootstrap/cache
+
+# 暴露 Cloud Run 所需的 8080 端口
+EXPOSE 8080
+
+# 使用 PHP 內建的開發伺服器
+CMD ["php", "artisan", "serve", "--host=0.0.0.0", "--port=8080"]

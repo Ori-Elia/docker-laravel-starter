@@ -1,0 +1,82 @@
+FROM php:8.3-fpm
+
+# 設定工作目錄
+WORKDIR /var/www
+
+# 安裝系統需要的套件
+RUN apt-get update && apt-get install -y \
+    libpng-dev \
+    libjpeg-dev \
+    libfreetype6-dev \
+    zip \
+    unzip \
+    git \
+    nginx \
+    supervisor \
+    vim \
+    curl \
+    htop \
+    && rm -rf /var/lib/apt/lists/*
+
+# 安裝 PHP 擴充功能
+RUN docker-php-ext-install pdo pdo_mysql
+
+# 安裝 Composer
+COPY --from=composer:latest /usr/bin/composer /usr/bin/composer
+
+# PHP 配置
+RUN echo "memory_limit=512M" > /usr/local/etc/php/conf.d/memory-limit.ini \
+    && echo "upload_max_filesize=10M" > /usr/local/etc/php/conf.d/upload-max-filesize.ini \
+    && echo "post_max_size=10M" > /usr/local/etc/php/conf.d/post-max-size.ini \
+    # 設定更詳細的錯誤報告
+    && echo "display_errors=On" > /usr/local/etc/php/conf.d/error-reporting.ini \
+    && echo "display_startup_errors=On" >> /usr/local/etc/php/conf.d/error-reporting.ini \
+    && echo "error_reporting=E_ALL" >> /usr/local/etc/php/conf.d/error-reporting.ini
+
+# OPcache 配置（staging 環境允許檢查檔案更新）
+RUN echo "opcache.enable=1" > /usr/local/etc/php/conf.d/opcache.ini \
+    && echo "opcache.memory_consumption=128" >> /usr/local/etc/php/conf.d/opcache.ini \
+    && echo "opcache.interned_strings_buffer=8" >> /usr/local/etc/php/conf.d/opcache.ini \
+    && echo "opcache.max_accelerated_files=4000" >> /usr/local/etc/php/conf.d/opcache.ini \
+    && echo "opcache.validate_timestamps=1" >> /usr/local/etc/php/conf.d/opcache.ini \
+    && echo "opcache.revalidate_freq=60" >> /usr/local/etc/php/conf.d/opcache.ini \
+    && echo "opcache.fast_shutdown=1" >> /usr/local/etc/php/conf.d/opcache.ini
+
+# 配置 supervisor 來管理服務
+RUN echo '[supervisord]\n\
+nodaemon=true\n\
+\n\
+[program:php-fpm]\n\
+command=php-fpm\n\
+stdout_logfile=/dev/stdout\n\
+stdout_logfile_maxbytes=0\n\
+stderr_logfile=/dev/stderr\n\
+stderr_logfile_maxbytes=0\n\
+\n\
+[program:nginx]\n\
+command=nginx -g "daemon off;"\n\
+stdout_logfile=/dev/stdout\n\
+stdout_logfile_maxbytes=0\n\
+stderr_logfile=/dev/stderr\n\
+stderr_logfile_maxbytes=0' > /etc/supervisor/conf.d/supervisord.conf
+
+# 複製專案檔案
+COPY src/ /var/www/
+COPY .docker/nginx/default.conf /etc/nginx/conf.d/default.conf
+
+# 安裝所有 Composer 依賴（包括開發依賴）
+RUN composer install --optimize-autoloader
+
+# Laravel 優化（但保留部分快取檢查）
+RUN php artisan optimize \
+    && php artisan config:cache \
+    && php artisan route:cache
+
+# 設定檔案權限
+RUN chown -R www-data:www-data /var/www/storage /var/www/bootstrap/cache
+
+# 暴露 Cloud Run 所需的 8080 端口
+EXPOSE 8080
+
+# 啟動服務
+CMD ["/usr/bin/supervisord", "-c", "/etc/supervisor/conf.d/supervisord.conf"]

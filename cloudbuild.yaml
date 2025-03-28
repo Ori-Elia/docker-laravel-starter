@@ -1,0 +1,97 @@
+################################
+# todo
+# 1. 設定 {project-id}
+# 2. 設定 {project-service-name}
+################################
+steps:
+  # 建立容器映像檔
+  - name: 'gcr.io/cloud-builders/docker'
+    args: [
+      'build',
+      '-t', 'gcr.io/{project-id}/{project-service-name}',
+      '-f', '.docker/php/Dockerfile.production',
+      '.'
+    ]
+
+  # 推送映像檔到 Container Registry
+  - name: 'gcr.io/cloud-builders/docker'
+    args: ['push', 'gcr.io/{project-id}/{project-service-name}']
+
+  # 部署到 Cloud Run
+  - name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'
+    entrypoint: gcloud
+    args: [
+      'run', 'deploy', '{project-service-name}',
+      '--image', 'gcr.io/{project-id}/{project-service-name}',
+      '--region', 'asia-east1',
+      '--platform', 'managed',
+      '--allow-unauthenticated',
+      '--memory', '512Mi',
+      '--cpu', '1',
+      '--port', '8080',
+      '--set-cloudsql-instances', '{project-id}:asia-east1:dev',
+      '--set-env-vars',
+      'PHP_MEMORY_LIMIT=512M,
+      UPLOAD_MAX_FILESIZE=10M,
+      POST_MAX_SIZE=10M'
+    ]
+
+  # 建立/更新所有維護用的 jobs
+  - name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'
+    entrypoint: gcloud
+    args: [
+      'run', 'jobs', 'deploy', 'migrate-database',
+      '--image', 'gcr.io/{project-id}/{project-service-name}',
+      '--args', 'sh,-c,php artisan migrate --force',
+      '--region', 'asia-east1',
+      '--set-cloudsql-instances', '{project-id}:asia-east1:dev'
+    ]
+
+  - name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'
+    entrypoint: gcloud
+    args: [
+      'run', 'jobs', 'deploy', 'migrate-database-refresh-seed',
+      '--image', 'gcr.io/{project-id}/{project-service-name}',
+      '--args', 'sh,-c,php artisan migrate:refresh --seed --force',
+      '--region', 'asia-east1',
+      '--set-cloudsql-instances', '{project-id}:asia-east1:dev'
+    ]
+
+  - name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'
+    entrypoint: gcloud
+    args: [
+      'run', 'jobs', 'deploy', 'check-env',
+      '--image', 'gcr.io/{project-id}/{project-service-name}',
+      '--args', 'sh,-c,echo "---" && php artisan env',
+      '--region', 'asia-east1'
+    ]
+
+  - name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'
+    entrypoint: gcloud
+    args: [
+      'run', 'jobs', 'deploy', 'show-laravel-log',
+      '--image', 'gcr.io/{project-id}/{project-service-name}',
+      '--args', 'sh,-c,cat storage/logs/laravel.log | grep "ERROR"',
+      '--region', 'asia-east1'
+    ]
+
+  - name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'
+    entrypoint: gcloud
+    args: [
+      'run', 'jobs', 'deploy', 'route-list',
+      '--image', 'gcr.io/{project-id}/{project-service-name}',
+      '--args', 'sh,-c,echo "---" && php artisan route:list',
+      '--region', 'asia-east1'
+    ]
+
+  # 執行資料庫遷移
+  - name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'
+    entrypoint: gcloud
+    args: [
+      'run', 'jobs', 'execute', 'migrate-database',
+      '--region', 'asia-east1'
+    ]
+
+images:
+  - 'gcr.io/{project-id}/{project-service-name}'
+
